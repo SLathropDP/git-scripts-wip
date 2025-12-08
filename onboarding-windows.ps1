@@ -7,7 +7,7 @@
   - Installs Node.js locally for the current user using the official ZIP release.
   - Adds both install directories to the *user* PATH and current session PATH.
   - Verifies that "pandoc" and "node" are available.
-  - Runs generate-all-snippet-mirror.js as a basic functional check.
+  - Does NOT run any snippet generation scripts; it only prepares the environment.
 
 .USAGE
   From the repo root in PowerShell:
@@ -153,34 +153,20 @@ function Install-NodeFromZip {
 }
 
 function Verify-Toolchain {
-  Write-Info "Verifying toolchain..."
-
-  if (-not (Test-CommandExists 'pandoc')) {
-    Write-ErrorMsg "pandoc not found on PATH."
-    return $false
-  }
+  Write-Info "Verifying toolchain (node + pandoc)..."
 
   if (-not (Test-CommandExists 'node')) {
-    Write-ErrorMsg "node not found on PATH."
+    Write-ErrorMsg "node not found on PATH. Please ensure Node.js is installed correctly."
     return $false
   }
 
-  $repo = Get-Location
-  $script = Join-Path $repo "scripts\generate-all-snippet-mirror.js"
-  if (-not (Test-Path $script)) {
-    Write-Warn "Mirror generation script not found; skipping test run."
-    return $true
-  }
-
-  Write-Info "Running mirror generator as a test..."
-  node $script
-
-  if ($LASTEXITCODE -ne 0) {
-    Write-ErrorMsg "Mirror generator exited with code $LASTEXITCODE"
+  if (-not (Test-CommandExists 'pandoc')) {
+    Write-ErrorMsg "pandoc not found on PATH. Please ensure Pandoc is installed correctly."
     return $false
   }
 
-  Write-Info "Toolchain verified successfully."
+  Write-Info "node:   $(node --version)"
+  Write-Info "pandoc: $(pandoc --version | Select-String -Pattern 'pandoc ' | Select-Object -First 1)"
   return $true
 }
 
@@ -210,4 +196,4 @@ if (-not $SkipVerification) {
   Write-Info "Skipping verification."
 }
 
-Write-Info "Onboarding complete. Restarting PowerShell is recommended if PATH was modified."
+Write-Info "Onboarding complete. If PATH was modified, this session already sees it; new terminals will as well."
