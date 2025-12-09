@@ -41,7 +41,6 @@ SET "ONBOARDING_PS1=%SCRIPT_DIR%\onboarding-windows.ps1"
 
 IF NOT EXIST "%ONBOARDING_PS1%" (
   ECHO [ERROR] Could not find onboarding-windows.ps1 at: "%ONBOARDING_PS1%"
-  ENDLOCAL
   EXIT /B 1
 )
 
