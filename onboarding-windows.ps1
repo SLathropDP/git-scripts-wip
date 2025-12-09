@@ -1,19 +1,18 @@
 <#
 .SYNOPSIS
-  Non-admin Windows onboarding for snippet mirroring (Pandoc + Node).
+  Windows onboarding (Pandoc + Node).
 
 .DESCRIPTION
   - Installs Pandoc locally using the official ZIP release.
   - Installs Node.js locally using the official ZIP release.
   - Adds both install directories to User PATH.
   - Uses hard-coded proxy settings for Invoke-WebRequest downloads.
-  - Does NOT run snippet generation scripts; only prepares the environment.
 #>
 
 param(
-  [string]$PandocVersion = "3.2",
+  [string]$PandocVersion = "2.14.0",
   [string]$PandocInstallDir = "$env:USERPROFILE\Tools\pandoc",
-  [string]$NodeVersion = "20.11.1",
+  [string]$NodeVersion = "22.19.1",
   [string]$NodeInstallDir = "$env:USERPROFILE\Tools\node",
   [switch]$SkipPandocInstall,
   [switch]$SkipNodeInstall,
@@ -21,9 +20,9 @@ param(
 )
 
 ###############################################################################
-# HARD-CODE YOUR NETWORK'S PROXY SETTINGS HERE
+# HARD-CODE NETWORK PROXY SETTINGS
 ###############################################################################
-# NOTE: Leave them empty if you do NOT want hard-coded proxy settings
+# NOTE: Leave these empty if you do NOT want hard-coded proxy settings
 ###############################################################################
 $HTTP_PROXY  = ""
 $HTTPS_PROXY = ""
@@ -107,7 +106,7 @@ function Install-PandocFromZip {
     return
   }
 
-  Write-Info "Installing Pandoc $Version (non-admin)..."
+  Write-Info "Installing Pandoc $Version..."
   Ensure-Directory $TargetDir
 
   $zip = "pandoc-$Version-windows-x86_64.zip"
@@ -148,7 +147,7 @@ function Install-NodeFromZip {
     return
   }
 
-  Write-Info "Installing Node.js $Version (non-admin)..."
+  Write-Info "Installing Node.js $Version..."
   Ensure-Directory $TargetDir
 
   $zip = "node-v$Version-win-x64.zip"
@@ -203,7 +202,7 @@ function Verify-Toolchain {
 # MAIN SCRIPT LOGIC
 ###############################################################################
 
-Write-Info "=== Windows onboarding for snippet mirroring ==="
+Write-Info "=== Windows onboarding ==="
 
 if (-not $SkipNodeInstall) {
   Install-NodeFromZip -Version $NodeVersion -TargetDir $NodeInstallDir
