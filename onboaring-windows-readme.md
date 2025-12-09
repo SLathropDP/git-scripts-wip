@@ -20,4 +20,6 @@ The script will:
 
 From the repository root:
 
-`powershell.exe -ExecutionPolicy Bypass -File scripts/onboarding-windows.ps1`
+```bash
+powershell.exe -ExecutionPolicy Bypass -File scripts/onboarding-windows.ps1
+```

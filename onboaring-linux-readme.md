@@ -6,7 +6,7 @@ ensure that the Node.js–based scripts and Git hooks can run successfully.
 
 ### What the onboarding script does
 
-- Confirms that **Node.js** is already installed  
+- Confirms that **Node.js** is already installed
   (Node.js is required, but the onboarding script does *not* install it)
 - Installs **Pandoc** via the system package manager (`dnf` or `yum`)
 - Enables the **EPEL repository** if needed (for RHEL-based systems)
@@ -21,3 +21,4 @@ From the repository root:
 
 ```bash
 chmod +x scripts/onboarding-linux.sh && ./scripts/onboarding-linux.sh
+```
