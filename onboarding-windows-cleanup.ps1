@@ -3,8 +3,8 @@ onboarding-windows-cleanup.ps1
 
 Simple cleanup script for the Windows onboarding artifacts:
 
-- Looks for Node.js installed under:   %USERPROFILE%\Tools\node
-- Looks for Pandoc installed under:    %USERPROFILE%\Tools\pandoc
+- Looks for Node.js installed under $nodeInstallDir
+- Looks for Pandoc installed under $pandocInstallDir
 - If found, prints the location and asks for confirmation before:
     - Deleting the install folder
     - Removing that folder from the user's PATH (registry + current session)
@@ -16,6 +16,9 @@ Usage (from PowerShell):
 
 $nodeInstallDir   = Join-Path $env:USERPROFILE "Tools\node"
 $pandocInstallDir = Join-Path $env:USERPROFILE "Tools\pandoc"
+
+# $nodeInstallDir   = "C:\PROGRAMS\AUTHORIZED\node"
+# $pandocInstallDir = "C:\PROGRAMS\AUTHORIZED\pandoc"
 
 function Write-Info($msg) { Write-Host $msg -ForegroundColor Cyan }
 function Write-Warn($msg) { Write-Host $msg -ForegroundColor Yellow }
@@ -75,7 +78,7 @@ function Confirm-And-Remove-Install {
     Write-Info "$Name files removed."
   }
   catch {
-    Write-Err "Failed to remove $InstallDir: $($_.Exception.Message)"
+    Write-Err ("Failed to remove {0}: {1}" -f $InstallDir, $_.Exception.Message)
   }
 
   Write-Info "Removing $InstallDir from PATH..."
@@ -83,7 +86,7 @@ function Confirm-And-Remove-Install {
   Write-Info "$Name PATH entry removed (user-level and current session)."
 }
 
-Write-Info "=== onboarding-windows cleanup ==="
+Write-Info "=== Windows onboarding cleanup ==="
 
 Confirm-And-Remove-Install -Name "Node.js" -InstallDir $nodeInstallDir -ExeName "node.exe"
 Confirm-And-Remove-Install -Name "Pandoc"  -InstallDir $pandocInstallDir -ExeName "pandoc.exe"
