@@ -1,23 +1,15 @@
-
----
-
-# ✅ **Updated Linux Onboarding Script**  
-**scripts/onboarding-linux.sh**  
-(minimal, supports both `dnf` and `yum`, no generation step)
-
-```bash
 #!/usr/bin/env bash
 #
 # onboarding-linux.sh
 #
-# Minimal Linux onboarding for snippet mirroring:
+# Minimal Linux onboarding:
+#
 #   - Verifies Node.js is installed (required for JS tooling)
 #   - Installs Pandoc (via dnf or yum) and enables EPEL if needed
-#   - Does NOT run any snippet generation scripts
 #
 # Usage (from repo root):
-#   chmod +x scripts/onboarding-linux.sh
-#   ./scripts/onboarding-linux.sh
+#
+#   chmod +x scripts/onboarding-linux.sh && ./scripts/onboarding-linux.sh
 #
 
 set -euo pipefail
@@ -56,7 +48,7 @@ ensure_pandoc_installed() {
   local pm
   pm="$(detect_pkg_manager)"
 
-  # Install EPEL if on RHEL/Rocky/Alma and not already enabled.
+  # Install EPEL if on RHEL and not already enabled.
   if ! "$pm" repolist epel >/dev/null 2>&1; then
     log_info "EPEL repository not detected; installing epel-release..."
     if ! sudo "$pm" -y install epel-release; then
@@ -74,7 +66,7 @@ ensure_pandoc_installed() {
 }
 
 main() {
-  log_info "=== Linux onboarding for snippet mirroring ==="
+  log_info "=== Linux onboarding ==="
   log_info "Repository root: $(pwd)"
 
   # Node.js is assumed installed, but we verify
@@ -83,7 +75,7 @@ main() {
 
   ensure_pandoc_installed
 
-  log_info "Onboarding complete. Environment is ready for snippet mirror scripts."
+  log_info "Onboarding complete. Environment is ready."
 }
 
 main "$@"

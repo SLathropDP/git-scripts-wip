@@ -1,13 +1,12 @@
 <#
 .SYNOPSIS
-  Non-admin Windows onboarding for snippet mirroring (Pandoc + Node).
+  Windows onboarding (Pandoc + Node).
 
 .DESCRIPTION
   - Installs Pandoc locally for the current user using the official ZIP release.
   - Installs Node.js locally for the current user using the official ZIP release.
   - Adds both install directories to the *user* PATH and current session PATH.
   - Verifies that "pandoc" and "node" are available.
-  - Does NOT run any snippet generation scripts; it only prepares the environment.
 
 .USAGE
   From the repo root...
@@ -178,7 +177,7 @@ function Verify-Toolchain {
 
 # --- MAIN --------------------------------------------------------
 
-Write-Info "=== Windows onboarding for snippet mirroring (non-admin) ==="
+Write-Info "=== Windows onboarding ==="
 Write-Info "Repository: $(Get-Location)"
 
 if (-not $SkipNodeInstall) {
