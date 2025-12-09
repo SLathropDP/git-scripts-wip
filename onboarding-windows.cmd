@@ -32,7 +32,6 @@ REM
 REM      will all work IMMEDIATELY without opening a new Command Prompt
 REM
 REM ================================================================================
-SETLOCAL ENABLEDELAYEDEXPANSION
 
 REM Resolve directory where this script lives
 SET "SCRIPT_DIR=%~dp0"
@@ -80,6 +79,7 @@ REM Important:
 REM   - PATH in registry defines what new terminals see
 REM   - PATH in *this cmd session* must be updated manually
 REM ================================================================================
+SET "USERPATH="
 FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v PATH 2^>NUL') DO (
   SET "USERPATH=%%B"
 )
@@ -95,6 +95,8 @@ REM
 REM The PowerShell script writes proxy settings to the registry for future shells.
 REM This wrapper loads them into THIS cmd session as well.
 REM ================================================================================
+SET "USER_HTTP_PROXY="
+
 FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTP_PROXY 2^>NUL') DO (
   SET "USER_HTTP_PROXY=%%B"
 )
@@ -103,6 +105,8 @@ IF DEFINED USER_HTTP_PROXY (
   ECHO [INFO] Loading HTTP_PROXY into this session...
   SET "HTTP_PROXY=%USER_HTTP_PROXY%"
 )
+
+SET "USER_HTTPS_PROXY="
 
 FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTPS_PROXY 2^>NUL') DO (
   SET "USER_HTTPS_PROXY=%%B"
@@ -119,12 +123,5 @@ REM ============================================================================
 ECHO [INFO] Onboarding tasks in this cmd session completed
 ECHO [INFO] PATH and proxy variables updated for THIS cmd session
 ECHO [INFO] Node, Pandoc, and npm should work immediately
-
-ENDLOCAL & (
-  REM Export updated variables back to the caller’s environment
-  IF DEFINED PATH SET "PATH=%PATH%"
-  IF DEFINED HTTP_PROXY SET "HTTP_PROXY=%HTTP_PROXY%"
-  IF DEFINED HTTPS_PROXY SET "HTTPS_PROXY=%HTTPS_PROXY%"
-)
 
 EXIT /B 0
