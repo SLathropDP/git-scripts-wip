@@ -7,8 +7,7 @@
 #   - On Windows (Git Bash / MSYS / Cygwin): runs scripts/onboarding-windows.ps1 via PowerShell
 #
 # Usage (from repo root):
-#   chmod +x scripts/onboarding.sh
-#   ./scripts/onboarding.sh
+#   chmod +x scripts/onboarding.sh && ./scripts/onboarding.sh
 #
 # Any arguments are forwarded to the underlying platform-specific script.
 #
@@ -26,10 +25,6 @@ log_warn()  { printf '\033[33m[WARN]\033[0m %s\n' "$*"; }
 log_error() { printf '\033[31m[ERROR]\033[0m %s\n' "$*"; }
 
 detect_os() {
-  # uname on:
-  #   Linux   → "Linux"
-  #   macOS   → "Darwin"
-  #   Git Bash / MSYS / Cygwin on Windows often → "MINGW64_NT-10.0", "MSYS_NT-...", "CYGWIN_NT-..."
   local uname_out
   uname_out="$(uname -s 2>/dev/null || echo unknown)"
 
@@ -78,7 +73,10 @@ run_windows_onboarding() {
   fi
 
   log_info "Detected Windows (Bash environment); running $WINDOWS_SCRIPT via $pwsh_cmd ..."
-  (cd "$REPO_ROOT" && "$pwsh_cmd" -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT" "$@")
+  (
+    cd "$REPO_ROOT"
+    "$pwsh_cmd" -NoLogo -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT" "$@"
+  )
 }
 
 main() {
@@ -90,8 +88,8 @@ main() {
       run_linux_onboarding "$@"
       ;;
     darwin)
-      log_warn "macOS detected; no dedicated onboarding script yet."
-      log_warn "You can install pandoc via Homebrew (brew install pandoc) and ensure node is installed."
+      log_warn "macOS detected; no dedicated onboarding-macos.sh yet."
+      log_warn "Install pandoc via Homebrew (brew install pandoc) and ensure node is installed."
       ;;
     windows)
       run_windows_onboarding "$@"
