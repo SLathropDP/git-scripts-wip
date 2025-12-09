@@ -33,11 +33,7 @@ REM      will all work IMMEDIATELY without opening a new Command Prompt
 REM
 REM ================================================================================
 
-REM Resolve directory where this script lives
-SET "SCRIPT_DIR=%~dp0"
-IF "%SCRIPT_DIR:~-1%"=="\" SET "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-
-SET "ONBOARDING_PS1=%SCRIPT_DIR%\onboarding-windows.ps1"
+SET "ONBOARDING_PS1=%~dp0onboarding-windows.ps1"
 
 IF NOT EXIST "%ONBOARDING_PS1%" (
   ECHO [ERROR] Could not find onboarding-windows.ps1 at: "%ONBOARDING_PS1%"
