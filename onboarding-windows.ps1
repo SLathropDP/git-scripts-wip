@@ -10,9 +10,15 @@
   - Does NOT run any snippet generation scripts; it only prepares the environment.
 
 .USAGE
-  From the repo root in PowerShell:
+  From the repo root...
+  
+    in Git Bash:
 
-      .\scripts\onboarding-windows.ps1
+      powershell.exe -ExecutionPolicy Bypass -File scripts/onboarding-windows.ps1
+
+    in cmd.exe:
+
+      powershell.exe -ExecutionPolicy Bypass -File scripts\onboarding-windows.ps1
 
   Optional parameters:
 
