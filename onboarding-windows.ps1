@@ -3,34 +3,35 @@
   Windows onboarding (Pandoc + Node).
 
 .DESCRIPTION
-  - Installs Pandoc locally using the official ZIP release.
-  - Installs Node.js locally using the official ZIP release.
-  - Adds both install directories to User PATH.
-  - Uses hard-coded proxy settings for Invoke-WebRequest downloads.
+  - Installs Pandoc locally using the official ZIP release (if not already present)
+  - Installs Node.js locally using the official ZIP release (if not already present)
+  - Adds both install directories to User PATH
+  - Uses hard-coded proxy settings for Invoke-WebRequest downloads
+  - Skips downloads if any version of node/pandoc is already installed
 #>
 
 param(
-  [string]$PandocVersion = "2.14.0.3",
+  [string]$PandocVersion    = "2.14.0.3",
   [string]$PandocInstallDir = "$env:USERPROFILE\Tools\pandoc",
-  [string]$NodeVersion = "22.20.0",
-  [string]$NodeInstallDir = "$env:USERPROFILE\Tools\node",
+  [string]$NodeVersion      = "22.20.0",
+  [string]$NodeInstallDir   = "$env:USERPROFILE\Tools\node",
   [switch]$SkipPandocInstall,
   [switch]$SkipNodeInstall,
   [switch]$SkipVerification
 )
 
 ###############################################################################
-# HARD-CODE NETWORK PROXY SETTINGS
+# HARD-CODED NETWORK PROXY SETTINGS
 ###############################################################################
-# NOTE: Leave these empty if you do NOT want hard-coded proxy settings
+# Leave them empty if you do NOT want proxy usage
 ###############################################################################
 $HTTP_PROXY  = ""
 $HTTPS_PROXY = ""
 ###############################################################################
 
-function Write-Info($msg)  { Write-Host $msg -ForegroundColor Cyan }
-function Write-Warn($msg)  { Write-Host $msg -ForegroundColor Yellow }
-function Write-ErrorMsg($msg) { Write-Host $msg -ForegroundColor Red }
+function Write-Info($msg)      { Write-Host $msg -ForegroundColor Cyan }
+function Write-Warn($msg)      { Write-Host $msg -ForegroundColor Yellow }
+function Write-ErrorMsg($msg)  { Write-Host $msg -ForegroundColor Red }
 
 function Test-CommandExists($name) {
   $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -58,7 +59,7 @@ function Invoke-WebRequestWithProxy {
     UseBasicParsing = $true
   }
 
-  # Prefer HTTPS_PROXY if URL is HTTPS
+  # Prefer HTTPS proxy if URL is HTTPS
   if ($Url -match '^https://' -and $HTTPS_PROXY) {
     Write-Info "Using HTTPS proxy: $HTTPS_PROXY"
     $params.Proxy = $HTTPS_PROXY
@@ -73,7 +74,6 @@ function Invoke-WebRequestWithProxy {
   Invoke-WebRequest @params
 }
 ###############################################################################
-
 
 function Add-UserPathDirectory($dir) {
   $fullDir = [System.IO.Path]::GetFullPath($dir)
@@ -96,28 +96,23 @@ function Add-UserPathDirectory($dir) {
 }
 
 ###############################################################################
-# Pandoc Installation
+# Pandoc Installation (assumes NOT already installed when called)
 ###############################################################################
 function Install-PandocFromZip {
   param([string]$Version,[string]$TargetDir)
 
-  if (Test-CommandExists 'pandoc') {
-    Write-Info "pandoc already installed: $(pandoc --version | Select-Object -First 1)"
-    return
-  }
-
   Write-Info "Installing Pandoc $Version..."
   Ensure-Directory $TargetDir
 
-  $zip = "pandoc-$Version-windows-x86_64.zip"
-  $url = "https://github.com/jgm/pandoc/releases/download/$Version/$zip"
-  $tmp = Join-Path $env:TEMP "pandoc-$Version.zip"
+  $zip        = "pandoc-$Version-windows-x86_64.zip"
+  $url        = "https://github.com/jgm/pandoc/releases/download/$Version/$zip"
+  $tmp        = Join-Path $env:TEMP "pandoc-$Version.zip"
   $tmpExtract = Join-Path $env:TEMP "pandoc-$Version-extract"
 
   Write-Info "Downloading Pandoc ZIP..."
   Invoke-WebRequestWithProxy -Url $url -OutFile $tmp
 
-  Write-Info "Extracting..."
+  Write-Info "Extracting Pandoc ZIP..."
   if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force }
   Expand-Archive -Path $tmp -DestinationPath $tmpExtract -Force
 
@@ -137,28 +132,23 @@ function Install-PandocFromZip {
 }
 
 ###############################################################################
-# Node Installation
+# Node Installation (assumes NOT already installed when called)
 ###############################################################################
 function Install-NodeFromZip {
   param([string]$Version,[string]$TargetDir)
 
-  if (Test-CommandExists 'node') {
-    Write-Info "node already installed: $(node --version)"
-    return
-  }
-
   Write-Info "Installing Node.js $Version..."
   Ensure-Directory $TargetDir
 
-  $zip = "node-v$Version-win-x64.zip"
-  $url = "https://nodejs.org/dist/v$Version/$zip"
-  $tmp = Join-Path $env:TEMP "node-$Version.zip"
+  $zip        = "node-v$Version-win-x64.zip"
+  $url        = "https://nodejs.org/dist/v$Version/$zip"
+  $tmp        = Join-Path $env:TEMP "node-$Version.zip"
   $tmpExtract = Join-Path $env:TEMP "node-$Version-extract"
 
   Write-Info "Downloading Node.js ZIP..."
   Invoke-WebRequestWithProxy -Url $url -OutFile $tmp
 
-  Write-Info "Extracting..."
+  Write-Info "Extracting Node.js ZIP..."
   if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force }
   Expand-Archive -Path $tmp -DestinationPath $tmpExtract -Force
 
@@ -184,12 +174,12 @@ function Verify-Toolchain {
   Write-Info "Verifying node + pandoc availability..."
 
   if (-not (Test-CommandExists 'node')) {
-    Write-ErrorMsg "node not found on PATH after install."
+    Write-ErrorMsg "node not found on PATH."
     return $false
   }
 
   if (-not (Test-CommandExists 'pandoc')) {
-    Write-ErrorMsg "pandoc not found on PATH after install."
+    Write-ErrorMsg "pandoc not found on PATH."
     return $false
   }
 
@@ -203,20 +193,34 @@ function Verify-Toolchain {
 ###############################################################################
 
 Write-Info "=== Windows onboarding ==="
+Write-Info "Repository: $(Get-Location)"
 
-if (-not $SkipNodeInstall) {
+# --- Node.js handling --------------------------------------------------------
+if ($SkipNodeInstall) {
+  Write-Info "Skipping Node.js installation (SkipNodeInstall specified)."
+} elseif (Test-CommandExists 'node') {
+  Write-Info "Node.js is already installed: $(node --version)"
+} else {
   Install-NodeFromZip -Version $NodeVersion -TargetDir $NodeInstallDir
 }
 
-if (-not $SkipPandocInstall) {
+# --- Pandoc handling ---------------------------------------------------------
+if ($SkipPandocInstall) {
+  Write-Info "Skipping Pandoc installation (SkipPandocInstall specified)."
+} elseif (Test-CommandExists 'pandoc') {
+  Write-Info "Pandoc is already installed: $(pandoc --version | Select-Object -First 1)"
+} else {
   Install-PandocFromZip -Version $PandocVersion -TargetDir $PandocInstallDir
 }
 
+# --- Final verification ------------------------------------------------------
 if (-not $SkipVerification) {
   if (-not (Verify-Toolchain)) {
     Write-ErrorMsg "Onboarding failed."
     exit 1
   }
+} else {
+  Write-Info "Skipping verification step (SkipVerification specified)."
 }
 
-Write-Info "Onboarding complete. PATH updated for current session and future terminals."
+Write-Info "Onboarding complete. If PATH was modified, this session already sees it; new terminals will as well."
