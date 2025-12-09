@@ -3,10 +3,12 @@
 # onboarding.sh
 #
 # Cross-platform wrapper for onboarding:
+#
 #   - On Linux: runs scripts/onboarding-linux.sh
 #   - On Windows (Git Bash / MSYS / Cygwin): runs scripts/onboarding-windows.ps1 via PowerShell
 #
-# Usage (from repo root):
+# Usage (from Git Bash in repo root):
+#
 #   chmod +x scripts/onboarding.sh && ./scripts/onboarding.sh
 #
 # Any arguments are forwarded to the underlying platform-specific script.
@@ -30,7 +32,6 @@ detect_os() {
 
   case "$uname_out" in
     Linux)   echo "linux" ;;
-    Darwin)  echo "darwin" ;;
     MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
     *)
       log_warn "Unknown OS from uname: $uname_out"
@@ -86,10 +87,6 @@ main() {
   case "$os" in
     linux)
       run_linux_onboarding "$@"
-      ;;
-    darwin)
-      log_warn "macOS detected; no dedicated onboarding-macos.sh yet."
-      log_warn "Install pandoc via Homebrew (brew install pandoc) and ensure node is installed."
       ;;
     windows)
       run_windows_onboarding "$@"
