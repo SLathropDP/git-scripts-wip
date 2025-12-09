@@ -10,9 +10,9 @@
 #>
 
 param(
-  [string]$PandocVersion = "2.14.0",
+  [string]$PandocVersion = "2.14.0.3",
   [string]$PandocInstallDir = "$env:USERPROFILE\Tools\pandoc",
-  [string]$NodeVersion = "22.19.1",
+  [string]$NodeVersion = "22.20.0",
   [string]$NodeInstallDir = "$env:USERPROFILE\Tools\node",
   [switch]$SkipPandocInstall,
   [switch]$SkipNodeInstall,
