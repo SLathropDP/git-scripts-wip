@@ -77,9 +77,7 @@ REM   - PATH in registry defines what new terminals see
 REM   - PATH in *this cmd session* must be updated manually
 REM ================================================================================
 SET "USERPATH="
-FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v PATH 2^>NUL') DO (
-  SET "USERPATH=%%B"
-)
+FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v PATH 2^>NUL') DO SET "USERPATH=%%B"
 
 IF DEFINED USERPATH (
   ECHO [INFO] Refreshing PATH for this cmd session...
@@ -94,9 +92,7 @@ REM This wrapper loads them into THIS cmd session as well.
 REM ================================================================================
 SET "USER_HTTP_PROXY="
 
-FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTP_PROXY 2^>NUL') DO (
-  SET "USER_HTTP_PROXY=%%B"
-)
+FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTP_PROXY 2^>NUL') DO SET "USER_HTTP_PROXY=%%B"
 
 IF DEFINED USER_HTTP_PROXY (
   ECHO [INFO] Loading HTTP_PROXY into this session...
@@ -105,9 +101,7 @@ IF DEFINED USER_HTTP_PROXY (
 
 SET "USER_HTTPS_PROXY="
 
-FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTPS_PROXY 2^>NUL') DO (
-  SET "USER_HTTPS_PROXY=%%B"
-)
+FOR /F "tokens=2,* skip=2" %%A IN ('reg query HKCU\Environment /v HTTPS_PROXY 2^>NUL') DO SET "USER_HTTPS_PROXY=%%B"
 
 IF DEFINED USER_HTTPS_PROXY (
   ECHO [INFO] Loading HTTPS_PROXY into this session...
