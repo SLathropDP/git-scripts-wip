@@ -16,9 +16,9 @@
 
   Optional parameters:
 
-      -PandocVersion "3.2"
+      -PandocVersion "2.14.0.3"
       -PandocInstallDir "C:\Users\<user>\Tools\pandoc"
-      -NodeVersion "20.11.1"
+      -NodeVersion "22.19.1"
       -NodeInstallDir "C:\Users\<user>\Tools\node"
       -SkipPandocInstall
       -SkipNodeInstall
@@ -26,9 +26,9 @@
 #>
 
 param(
-  [string]$PandocVersion = "3.2",
+  [string]$PandocVersion = "2.14.0.3",
   [string]$PandocInstallDir = "$env:USERPROFILE\Tools\pandoc",
-  [string]$NodeVersion = "20.11.1",
+  [string]$NodeVersion = "22.19.1",
   [string]$NodeInstallDir = "$env:USERPROFILE\Tools\node",
   [switch]$SkipPandocInstall,
   [switch]$SkipNodeInstall,

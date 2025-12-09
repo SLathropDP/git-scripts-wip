@@ -1,26 +1,23 @@
-## Linux Onboarding (RHEL / Rocky / Alma / CentOS / Fedora)
+## Windows onboarding (admin rights unnecessary)
 
-This repository includes a shell-based onboarding script that sets up the
-minimum tooling required for the snippet mirroring system. The goal is to
-ensure that the Node.js–based scripts and Git hooks can run successfully.
+This repo includes a PowerShell onboarding script that sets up the tools needed
+for working with `.docx` snippet mirrors **without requiring admin privileges**.
 
-### What the onboarding script does
+The script will:
 
-- Confirms that **Node.js** is already installed  
-  (Node.js is required, but the onboarding script does *not* install it)
-- Installs **Pandoc** via the system package manager (`dnf` or `yum`)
-- Enables the **EPEL repository** if needed (for RHEL-based systems)
-- Performs no further actions:  
-  it does *not* generate snippet mirrors, run tests, or modify code
+- Install **Node.js** (ZIP/portable build) into a user-local folder
+- Install **Pandoc** (ZIP build) into a user-local folder
+- Add both to the **user PATH**
+- Run the snippet mirror generator as a quick verification
 
-This keeps onboarding quick and minimal, while ensuring all subsequent tools
-(such as the Git pre-commit hook and the snippet mirror generation scripts)
-are able to run.
+### Prerequisites
 
-### Running the Linux onboarding script
+- Windows 10 or later
+- PowerShell (the built-in one is fine)
+- An internet connection (to download Node + Pandoc ZIPs)
+
+### Running the onboarding script
 
 From the repository root:
 
-```bash
-chmod +x scripts/onboarding-linux.sh
-./scripts/onboarding-linux.sh
+`powershell.exe -ExecutionPolicy Bypass -File scripts/onboarding-windows.ps1`
