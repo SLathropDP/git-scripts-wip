@@ -58,7 +58,6 @@ IF "%ERRORLEVEL%"=="0" (
     SET "PWSH_CMD=powershell.exe"
   ) ELSE (
     ECHO [ERROR] No PowerShell executable found (pwsh / powershell.exe).
-    ENDLOCAL
     EXIT /B 1
   )
 )
@@ -67,7 +66,6 @@ ECHO [INFO] Running onboarding-windows.ps1 via %PWSH_CMD% ...
 %PWSH_CMD% -NoLogo -ExecutionPolicy Bypass -File "%ONBOARDING_PS1%" %*
 IF ERRORLEVEL 1 (
   ECHO [ERROR] Onboarding script returned a non-zero exit code.
-  ENDLOCAL
   EXIT /B 1
 )
 
