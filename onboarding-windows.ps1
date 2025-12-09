@@ -1,18 +1,19 @@
 <#
 .SYNOPSIS
-  Windows onboarding (Pandoc + Node).
+  Non-admin Windows onboarding for snippet mirroring (Pandoc + Node).
 
 .DESCRIPTION
   - Installs Pandoc locally using the official ZIP release.
   - Installs Node.js locally using the official ZIP release.
   - Adds both install directories to User PATH.
   - Uses hard-coded proxy settings for Invoke-WebRequest downloads.
+  - Does NOT run snippet generation scripts; only prepares the environment.
 #>
 
 param(
-  [string]$PandocVersion = "2.14.0",
+  [string]$PandocVersion = "3.2",
   [string]$PandocInstallDir = "$env:USERPROFILE\Tools\pandoc",
-  [string]$NodeVersion = "22.19.1",
+  [string]$NodeVersion = "20.11.1",
   [string]$NodeInstallDir = "$env:USERPROFILE\Tools\node",
   [switch]$SkipPandocInstall,
   [switch]$SkipNodeInstall,
@@ -20,7 +21,9 @@ param(
 )
 
 ###############################################################################
-# NETWORK PROXY SETTINGS
+# HARD-CODE YOUR NETWORK'S PROXY SETTINGS HERE
+###############################################################################
+# NOTE: Leave them empty if you do NOT want hard-coded proxy settings
 ###############################################################################
 $HTTP_PROXY  = ""
 $HTTPS_PROXY = ""
@@ -120,4 +123,101 @@ function Install-PandocFromZip {
   Expand-Archive -Path $tmp -DestinationPath $tmpExtract -Force
 
   $nested = Join-Path $tmpExtract "pandoc-$Version"
-  if (-not (Test-Path $nested)) { $ne
+  if (-not (Test-Path $nested)) { $nested = $tmpExtract }
+
+  Write-Info "Copying Pandoc files to $TargetDir ..."
+  Get-ChildItem $nested | ForEach-Object {
+    Copy-Item $_.FullName -Destination $TargetDir -Recurse -Force
+  }
+
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
+
+  Add-UserPathDirectory $TargetDir
+  Write-Info "Pandoc installation complete."
+}
+
+###############################################################################
+# Node Installation
+###############################################################################
+function Install-NodeFromZip {
+  param([string]$Version,[string]$TargetDir)
+
+  if (Test-CommandExists 'node') {
+    Write-Info "node already installed: $(node --version)"
+    return
+  }
+
+  Write-Info "Installing Node.js $Version (non-admin)..."
+  Ensure-Directory $TargetDir
+
+  $zip = "node-v$Version-win-x64.zip"
+  $url = "https://nodejs.org/dist/v$Version/$zip"
+  $tmp = Join-Path $env:TEMP "node-$Version.zip"
+  $tmpExtract = Join-Path $env:TEMP "node-$Version-extract"
+
+  Write-Info "Downloading Node.js ZIP..."
+  Invoke-WebRequestWithProxy -Url $url -OutFile $tmp
+
+  Write-Info "Extracting..."
+  if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force }
+  Expand-Archive -Path $tmp -DestinationPath $tmpExtract -Force
+
+  $nested = Join-Path $tmpExtract "node-v$Version-win-x64"
+  if (-not (Test-Path $nested)) { $nested = $tmpExtract }
+
+  Write-Info "Copying Node.js files to $TargetDir ..."
+  Get-ChildItem $nested | ForEach-Object {
+    Copy-Item $_.FullName -Destination $TargetDir -Recurse -Force
+  }
+
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
+
+  Add-UserPathDirectory $TargetDir
+  Write-Info "Node.js installation complete."
+}
+
+###############################################################################
+# Toolchain Verification
+###############################################################################
+function Verify-Toolchain {
+  Write-Info "Verifying node + pandoc availability..."
+
+  if (-not (Test-CommandExists 'node')) {
+    Write-ErrorMsg "node not found on PATH after install."
+    return $false
+  }
+
+  if (-not (Test-CommandExists 'pandoc')) {
+    Write-ErrorMsg "pandoc not found on PATH after install."
+    return $false
+  }
+
+  Write-Info "node:   $(node --version)"
+  Write-Info "pandoc: $(pandoc --version | Select-Object -First 1)"
+  return $true
+}
+
+###############################################################################
+# MAIN SCRIPT LOGIC
+###############################################################################
+
+Write-Info "=== Windows onboarding for snippet mirroring ==="
+
+if (-not $SkipNodeInstall) {
+  Install-NodeFromZip -Version $NodeVersion -TargetDir $NodeInstallDir
+}
+
+if (-not $SkipPandocInstall) {
+  Install-PandocFromZip -Version $PandocVersion -TargetDir $PandocInstallDir
+}
+
+if (-not $SkipVerification) {
+  if (-not (Verify-Toolchain)) {
+    Write-ErrorMsg "Onboarding failed."
+    exit 1
+  }
+}
+
+Write-Info "Onboarding complete. PATH updated for current session and future terminals."
