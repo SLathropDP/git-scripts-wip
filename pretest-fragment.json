@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "pretest": "node -e \"console.error('\\u001b[1m\\u001b[33m⚠️  WARNING: tests in packages/foo/__tests__ are skipped\\u001b[0m')\"",
+    "test": "jest"
+  }
+}
