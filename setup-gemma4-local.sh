@@ -10,6 +10,8 @@
 #   MODEL=gemma4:e4b-it-q4_K_M
 #   CONTEXT=16384
 #   LOCAL_MODEL=gemma4-js-local
+#   OLLAMA_KEEP_ALIVE=120m
+#   INSTALL_CLAUDE_CODE=1
 #
 # Example install/execute:
 #   chmod +x setup-gemma4-local.sh
@@ -27,9 +29,10 @@
 #
 # Useful variants:
 #   INSTALL_OPENCODE=0 ./setup-gemma4-local.sh
-#   INSTALL_CLAUDE_CODE=1 ./setup-gemma4-local.sh
+#   INSTALL_CLAUDE_CODE=0 ./setup-gemma4-local.sh
 #   MODEL=gemma4:e2b-it-q4_K_M LOCAL_MODEL=gemma4-e2b-js CONTEXT=8192 ./setup-gemma4-local.sh
 #   MODEL=gemma4:26b-a4b-it-q4_K_M LOCAL_MODEL=gemma4-26b-js CONTEXT=4096 ./setup-gemma4-local.sh
+#   OLLAMA_KEEP_ALIVE=30m ./setup-gemma4-local.sh
 #   FORCE_PULL=1 ./setup-gemma4-local.sh
 #
 # Timing / sanity-check controls:
@@ -56,7 +59,7 @@ CLAUDE_MODEL_ALIAS="${CLAUDE_MODEL_ALIAS:-claude-gemma4-js-local}"
 CONTEXT="${CONTEXT:-16384}"
 
 INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
-INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-0}"
+INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
 UPDATE_OPENCODE="${UPDATE_OPENCODE:-0}"
 UPDATE_CLAUDE_CODE="${UPDATE_CLAUDE_CODE:-0}"
 
@@ -65,6 +68,8 @@ UPDATE_OLLAMA="${UPDATE_OLLAMA:-0}"
 FORCE_PULL="${FORCE_PULL:-0}"
 SKIP_PULL="${SKIP_PULL:-0}"
 DISABLE_PROXY_CONFIG="${DISABLE_PROXY_CONFIG:-0}"
+
+OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-120m}"
 
 SANITY_CURL_MAX_TIME="${SANITY_CURL_MAX_TIME:-600}"
 SANITY_CURL_CONNECT_TIMEOUT="${SANITY_CURL_CONNECT_TIMEOUT:-30}"
@@ -89,6 +94,9 @@ SCRIPT_OLLAMA_DROPIN_DIR="/etc/systemd/system/ollama.service.d"
 SCRIPT_MAIN_DROPIN="${SCRIPT_OLLAMA_DROPIN_DIR}/10-local-gemma4.conf"
 SCRIPT_PROXY_DROPIN="${SCRIPT_OLLAMA_DROPIN_DIR}/20-outbound-proxy.conf"
 
+# Make user-local binaries visible during reruns.
+export PATH="$HOME/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+
 log()  { printf "\n\033[1;32m==> %s\033[0m\n" "$*"; }
 warn() { printf "\n\033[1;33mWARN: %s\033[0m\n" "$*" >&2; }
 die()  { printf "\nERROR: %s\n" "$*" >&2; exit 1; }
@@ -97,6 +105,7 @@ systemd_escape_env_value() {
   local s="${1:-}"
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
+  s="${s//%/%%}"
   printf '%s' "$s"
 }
 
@@ -260,7 +269,7 @@ Environment="OLLAMA_HOST=${OLLAMA_BIND}"
 Environment="OLLAMA_CONTEXT_LENGTH=${CONTEXT}"
 Environment="OLLAMA_NUM_PARALLEL=1"
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
-Environment="OLLAMA_KEEP_ALIVE=10m"
+Environment="OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}"
 Environment="OLLAMA_NO_CLOUD=${DISABLE_CLOUD}"
 
 # Keep local client-to-Ollama traffic out of proxies.
@@ -453,7 +462,7 @@ fi
 log "Preloading model"
 ollama_api_curl_sanity -fsS \
   -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg model "$LOCAL_MODEL" '{model:$model, prompt:"", keep_alive:"10m"}')" \
+  -d "$(jq -nc --arg model "$LOCAL_MODEL" --arg keep_alive "$OLLAMA_KEEP_ALIVE" '{model:$model, prompt:"", keep_alive:$keep_alive}')" \
   "${OLLAMA_API_BASE}/api/generate" \
   >/dev/null || true
 
@@ -477,12 +486,14 @@ EOF_PROMPT
 payload="$(jq -nc \
   --arg model "$LOCAL_MODEL" \
   --arg prompt "$PROMPT" \
+  --arg keep_alive "$OLLAMA_KEEP_ALIVE" \
   --argjson ctx "$CONTEXT" \
   --argjson threads "$INFERENCE_THREADS" \
   --argjson predict "$SANITY_NUM_PREDICT" \
   '{
     model:$model,
     stream:false,
+    keep_alive:$keep_alive,
     options:{
       num_ctx:$ctx,
       temperature:0.2,
@@ -549,6 +560,7 @@ echo "Output tokens: ${native_output_tokens}"
 echo "Prompt eval speed: ${native_prompt_tps} tokens/sec"
 echo "Output eval speed: ${native_output_tps} tokens/sec"
 echo "Curl max-time: ${SANITY_CURL_MAX_TIME}s"
+echo "Keep alive: ${OLLAMA_KEEP_ALIVE}"
 echo
 echo "$native_out" | jq -r '.message.content'
 
@@ -651,7 +663,11 @@ if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
     claude --version || true
   else
     curl -fsSL https://claude.ai/install.sh | bash
+    export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+    claude --version || true
   fi
+else
+  log "Skipping Claude Code install because INSTALL_CLAUDE_CODE=0"
 fi
 
 log "Creating helper launchers in ~/bin"
@@ -659,7 +675,7 @@ mkdir -p "$HOME/bin"
 
 cat > "$HOME/bin/opencode-local-gemma4" <<EOF_OPENCODE_HELPER
 #!/usr/bin/env bash
-export PATH="\$HOME/.npm-global/bin:\$PATH"
+export PATH="\$HOME/.npm-global/bin:\$HOME/.local/bin:\$HOME/bin:\$PATH"
 export NO_PROXY="127.0.0.1,localhost,::1\${NO_PROXY:+,\$NO_PROXY}"
 export no_proxy="\$NO_PROXY"
 exec opencode --model "ollama/${LOCAL_MODEL}" "\$@"
@@ -668,6 +684,7 @@ chmod +x "$HOME/bin/opencode-local-gemma4"
 
 cat > "$HOME/bin/claude-local-gemma4" <<EOF_CLAUDE_HELPER
 #!/usr/bin/env bash
+export PATH="\$HOME/.local/bin:\$HOME/bin:\$PATH"
 export ANTHROPIC_AUTH_TOKEN=ollama
 export ANTHROPIC_BASE_URL=${OLLAMA_CLIENT_BASE}
 export CLAUDE_CODE_ATTRIBUTION_HEADER=0
@@ -679,6 +696,10 @@ chmod +x "$HOME/bin/claude-local-gemma4"
 
 if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
+fi
+
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 fi
 
 log "Current Ollama models"
@@ -699,6 +720,9 @@ Claude-compatible alias:
 Ollama local API:
   ${OLLAMA_CLIENT_BASE}
 
+Ollama keep-alive:
+  ${OLLAMA_KEEP_ALIVE}
+
 Sanity-check timeout:
   ${SANITY_CURL_MAX_TIME}s
 
@@ -710,8 +734,7 @@ Use OpenCode:
 OpenCode one-shot:
   opencode run --model ollama/${LOCAL_MODEL} "Review src/foo.js for bugs"
 
-Use Claude Code after installing it:
-  INSTALL_CLAUDE_CODE=1 ./setup-gemma4-local.sh
+Use Claude Code:
   source ~/.bashrc
   cd /path/to/project
   claude-local-gemma4 .
@@ -729,6 +752,12 @@ Refresh the base model on a later rerun:
 
 Increase sanity-check timeout:
   SANITY_CURL_MAX_TIME=900 ./setup-gemma4-local.sh
+
+Change keep-alive on a later rerun:
+  OLLAMA_KEEP_ALIVE=30m ./setup-gemma4-local.sh
+
+Skip Claude Code install on a later rerun:
+  INSTALL_CLAUDE_CODE=0 ./setup-gemma4-local.sh
 
 Disable this script's proxy drop-in on a later rerun:
   DISABLE_PROXY_CONFIG=1 ./setup-gemma4-local.sh
