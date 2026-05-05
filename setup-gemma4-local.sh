@@ -32,6 +32,12 @@
 #   MODEL=gemma4:26b-a4b-it-q4_K_M LOCAL_MODEL=gemma4-26b-js CONTEXT=4096 ./setup-gemma4-local.sh
 #   FORCE_PULL=1 ./setup-gemma4-local.sh
 #
+# Timing / sanity-check controls:
+#   SANITY_CURL_MAX_TIME=600        # 10 minutes by default
+#   SANITY_CURL_CONNECT_TIMEOUT=30
+#   SANITY_NUM_PREDICT=512
+#   INFERENCE_THREADS=4
+#
 # Notes:
 #   - Local Ollama API calls deliberately use:
 #       curl --noproxy '*' -H 'Host: localhost:11434'
@@ -48,13 +54,22 @@ MODEL="${MODEL:-gemma4:e4b-it-q4_K_M}"
 LOCAL_MODEL="${LOCAL_MODEL:-gemma4-js-local}"
 CLAUDE_MODEL_ALIAS="${CLAUDE_MODEL_ALIAS:-claude-gemma4-js-local}"
 CONTEXT="${CONTEXT:-16384}"
+
 INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-0}"
+UPDATE_OPENCODE="${UPDATE_OPENCODE:-0}"
+UPDATE_CLAUDE_CODE="${UPDATE_CLAUDE_CODE:-0}"
+
 DISABLE_CLOUD="${DISABLE_CLOUD:-1}"
 UPDATE_OLLAMA="${UPDATE_OLLAMA:-0}"
 FORCE_PULL="${FORCE_PULL:-0}"
 SKIP_PULL="${SKIP_PULL:-0}"
 DISABLE_PROXY_CONFIG="${DISABLE_PROXY_CONFIG:-0}"
+
+SANITY_CURL_MAX_TIME="${SANITY_CURL_MAX_TIME:-600}"
+SANITY_CURL_CONNECT_TIMEOUT="${SANITY_CURL_CONNECT_TIMEOUT:-30}"
+SANITY_NUM_PREDICT="${SANITY_NUM_PREDICT:-512}"
+INFERENCE_THREADS="${INFERENCE_THREADS:-4}"
 
 # Preserve whether OLLAMA_HTTPS_PROXY was explicitly supplied by the caller.
 REQUESTED_OLLAMA_HTTPS_PROXY="${OLLAMA_HTTPS_PROXY:-}"
@@ -85,6 +100,17 @@ systemd_escape_env_value() {
   printf '%s' "$s"
 }
 
+now_ns() {
+  date +%s%N
+}
+
+elapsed_seconds() {
+  local start_ns="$1"
+  local end_ns="$2"
+
+  awk -v s="$start_ns" -v e="$end_ns" 'BEGIN { printf "%.3f", (e - s) / 1000000000 }'
+}
+
 # Use this wrapper for local Ollama HTTP API calls only.
 # It bypasses proxy interception and supplies the Host header that worked in testing.
 ollama_api_curl() {
@@ -97,6 +123,14 @@ ollama_api_curl() {
     curl --noproxy '*' \
       -H "Host: ${OLLAMA_HOST_HEADER}" \
       "$@"
+}
+
+# Use this for slow local inference sanity checks.
+ollama_api_curl_sanity() {
+  ollama_api_curl \
+    --connect-timeout "$SANITY_CURL_CONNECT_TIMEOUT" \
+    --max-time "$SANITY_CURL_MAX_TIME" \
+    "$@"
 }
 
 # Use this wrapper for local Ollama CLI calls.
@@ -272,6 +306,14 @@ if ! command -v sudo >/dev/null 2>&1; then
   die "sudo is required."
 fi
 
+if [ "$LOCAL_MODEL" = "$MODEL" ]; then
+  die "LOCAL_MODEL must not equal MODEL. Use a separate local model name, e.g. LOCAL_MODEL=gemma4-js-local."
+fi
+
+if [ "$CLAUDE_MODEL_ALIAS" = "$MODEL" ]; then
+  die "CLAUDE_MODEL_ALIAS must not equal MODEL. Use a separate alias, e.g. CLAUDE_MODEL_ALIAS=claude-gemma4-js-local."
+fi
+
 if [ -r /etc/os-release ]; then
   # shellcheck disable=SC1091
   . /etc/os-release
@@ -409,7 +451,7 @@ EOF_ALIAS
 fi
 
 log "Preloading model"
-ollama_api_curl -fsS \
+ollama_api_curl_sanity -fsS \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg model "$LOCAL_MODEL" '{model:$model, prompt:"", keep_alive:"10m"}')" \
   "${OLLAMA_API_BASE}/api/generate" \
@@ -436,43 +478,119 @@ payload="$(jq -nc \
   --arg model "$LOCAL_MODEL" \
   --arg prompt "$PROMPT" \
   --argjson ctx "$CONTEXT" \
+  --argjson threads "$INFERENCE_THREADS" \
+  --argjson predict "$SANITY_NUM_PREDICT" \
   '{
     model:$model,
     stream:false,
-    options:{num_ctx:$ctx, temperature:0.2, num_thread:4},
+    options:{
+      num_ctx:$ctx,
+      temperature:0.2,
+      num_thread:$threads,
+      num_predict:$predict
+    },
     messages:[{role:"user", content:$prompt}]
   }'
 )"
 
-native_out="$(ollama_api_curl -fsS \
+native_start_ns="$(now_ns)"
+
+if ! native_out="$(ollama_api_curl_sanity -fsS \
   -H 'Content-Type: application/json' \
   -d "$payload" \
-  "${OLLAMA_API_BASE}/api/chat")"
+  "${OLLAMA_API_BASE}/api/chat")"; then
+
+  native_end_ns="$(now_ns)"
+  native_elapsed_sec="$(elapsed_seconds "$native_start_ns" "$native_end_ns")"
+
+  echo
+  echo "----- Ollama native API request failed -----"
+  echo "Elapsed wall-clock time: ${native_elapsed_sec}s"
+  echo "Curl max-time: ${SANITY_CURL_MAX_TIME}s"
+  die "JavaScript analysis/generation sanity check failed."
+fi
+
+native_end_ns="$(now_ns)"
+native_elapsed_sec="$(elapsed_seconds "$native_start_ns" "$native_end_ns")"
+
+native_reported_total_sec="$(echo "$native_out" | jq -r '
+  if .total_duration then
+    (.total_duration / 1000000000 | tostring)
+  else
+    "n/a"
+  end
+')"
+
+native_prompt_tps="$(echo "$native_out" | jq -r '
+  if .prompt_eval_count and .prompt_eval_duration and .prompt_eval_duration > 0 then
+    (.prompt_eval_count / (.prompt_eval_duration / 1000000000) | tostring)
+  else
+    "n/a"
+  end
+')"
+
+native_output_tps="$(echo "$native_out" | jq -r '
+  if .eval_count and .eval_duration and .eval_duration > 0 then
+    (.eval_count / (.eval_duration / 1000000000) | tostring)
+  else
+    "n/a"
+  end
+')"
+
+native_prompt_tokens="$(echo "$native_out" | jq -r '.prompt_eval_count // "n/a"')"
+native_output_tokens="$(echo "$native_out" | jq -r '.eval_count // "n/a"')"
 
 echo
 echo "----- Ollama native API response -----"
+echo "Elapsed wall-clock time: ${native_elapsed_sec}s"
+echo "Ollama-reported total time: ${native_reported_total_sec}s"
+echo "Prompt tokens: ${native_prompt_tokens}"
+echo "Output tokens: ${native_output_tokens}"
+echo "Prompt eval speed: ${native_prompt_tps} tokens/sec"
+echo "Output eval speed: ${native_output_tps} tokens/sec"
+echo "Curl max-time: ${SANITY_CURL_MAX_TIME}s"
+echo
 echo "$native_out" | jq -r '.message.content'
 
 log "Running Anthropic Messages API sanity check for Claude Code compatibility"
 anthropic_payload="$(jq -nc \
   --arg model "$CLAUDE_MODEL_ALIAS" \
   --arg prompt "In one paragraph, explain what a closure is in JavaScript and include a 5-line example." \
+  --argjson max_tokens "$SANITY_NUM_PREDICT" \
   '{
     model:$model,
-    max_tokens:512,
+    max_tokens:$max_tokens,
     system:"You are a terse JavaScript tutor.",
     messages:[{role:"user", content:$prompt}]
   }'
 )"
 
-anthropic_out="$(ollama_api_curl -fsS \
+anthropic_start_ns="$(now_ns)"
+
+if ! anthropic_out="$(ollama_api_curl_sanity -fsS \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer ollama' \
   -d "$anthropic_payload" \
-  "${OLLAMA_API_BASE}/v1/messages")"
+  "${OLLAMA_API_BASE}/v1/messages")"; then
+
+  anthropic_end_ns="$(now_ns)"
+  anthropic_elapsed_sec="$(elapsed_seconds "$anthropic_start_ns" "$anthropic_end_ns")"
+
+  echo
+  echo "----- Anthropic-compatible API request failed -----"
+  echo "Elapsed wall-clock time: ${anthropic_elapsed_sec}s"
+  echo "Curl max-time: ${SANITY_CURL_MAX_TIME}s"
+  die "Anthropic-compatible API sanity check failed."
+fi
+
+anthropic_end_ns="$(now_ns)"
+anthropic_elapsed_sec="$(elapsed_seconds "$anthropic_start_ns" "$anthropic_end_ns")"
 
 echo
 echo "----- Anthropic-compatible API response -----"
+echo "Elapsed wall-clock time: ${anthropic_elapsed_sec}s"
+echo "Curl max-time: ${SANITY_CURL_MAX_TIME}s"
+echo
 echo "$anthropic_out" | jq -r '.content[0].text // .content // .'
 
 log "Writing OpenCode config"
@@ -504,7 +622,7 @@ EOF_OPENCODE
 cat "$HOME/.config/opencode/opencode.json"
 
 if [ "$INSTALL_OPENCODE" = "1" ]; then
-  log "Installing OpenCode via user-local npm"
+  log "Installing or checking OpenCode via user-local npm"
   if command -v npm >/dev/null 2>&1; then
     mkdir -p "$HOME/.npm-global"
     npm config set prefix "$HOME/.npm-global"
@@ -514,16 +632,26 @@ if [ "$INSTALL_OPENCODE" = "1" ]; then
       echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> "$HOME/.bashrc"
     fi
 
-    npm install -g opencode-ai || warn "npm install -g opencode-ai failed. Install OpenCode manually if needed."
-    opencode --version || true
+    if command -v opencode >/dev/null 2>&1 && [ "$UPDATE_OPENCODE" != "1" ]; then
+      log "OpenCode already installed. Set UPDATE_OPENCODE=1 to reinstall/update."
+      opencode --version || true
+    else
+      npm install -g opencode-ai || warn "npm install -g opencode-ai failed. Install OpenCode manually if needed."
+      opencode --version || true
+    fi
   else
     warn "npm not found. Install OpenCode later with: curl -fsSL https://opencode.ai/install | bash"
   fi
 fi
 
 if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
-  log "Installing Claude Code"
-  curl -fsSL https://claude.ai/install.sh | bash
+  log "Installing or checking Claude Code"
+  if command -v claude >/dev/null 2>&1 && [ "$UPDATE_CLAUDE_CODE" != "1" ]; then
+    log "Claude Code already installed. Set UPDATE_CLAUDE_CODE=1 to reinstall/update."
+    claude --version || true
+  else
+    curl -fsSL https://claude.ai/install.sh | bash
+  fi
 fi
 
 log "Creating helper launchers in ~/bin"
@@ -571,6 +699,9 @@ Claude-compatible alias:
 Ollama local API:
   ${OLLAMA_CLIENT_BASE}
 
+Sanity-check timeout:
+  ${SANITY_CURL_MAX_TIME}s
+
 Use OpenCode:
   source ~/.bashrc
   cd /path/to/project
@@ -595,6 +726,9 @@ Re-test local Ollama health check:
 
 Refresh the base model on a later rerun:
   FORCE_PULL=1 ./setup-gemma4-local.sh
+
+Increase sanity-check timeout:
+  SANITY_CURL_MAX_TIME=900 ./setup-gemma4-local.sh
 
 Disable this script's proxy drop-in on a later rerun:
   DISABLE_PROXY_CONFIG=1 ./setup-gemma4-local.sh
