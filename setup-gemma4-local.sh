@@ -15,18 +15,32 @@
 #   chmod +x setup-gemma4-local.sh
 #   CONTEXT=16384 ./setup-gemma4-local.sh
 #
+# Proxy-aware examples:
+#   # Auto-detect HTTPS_PROXY/https_proxy from your shell and pass it to the Ollama daemon:
+#   HTTPS_PROXY=http://proxy.example.com:8080 CONTEXT=16384 ./setup-gemma4-local.sh
+#
+#   # Explicitly set the proxy used by the Ollama daemon for model pulls:
+#   OLLAMA_HTTPS_PROXY=http://proxy.example.com:8080 CONTEXT=16384 ./setup-gemma4-local.sh
+#
+#   # Remove this script's Ollama daemon proxy drop-in:
+#   DISABLE_PROXY_CONFIG=1 ./setup-gemma4-local.sh
+#
 # Useful variants:
 #   INSTALL_OPENCODE=0 ./setup-gemma4-local.sh
 #   INSTALL_CLAUDE_CODE=1 ./setup-gemma4-local.sh
 #   MODEL=gemma4:e2b-it-q4_K_M LOCAL_MODEL=gemma4-e2b-js CONTEXT=8192 ./setup-gemma4-local.sh
 #   MODEL=gemma4:26b-a4b-it-q4_K_M LOCAL_MODEL=gemma4-26b-js CONTEXT=4096 ./setup-gemma4-local.sh
+#   FORCE_PULL=1 ./setup-gemma4-local.sh
 #
 # Notes:
 #   - Local Ollama API calls deliberately use:
 #       curl --noproxy '*' -H 'Host: localhost:11434'
 #     because some RHEL/AWS/proxy environments return 403 for plain
 #     http://127.0.0.1:11434 curl checks.
-#   - Outbound installer/model-download traffic is not forced through --noproxy.
+#   - Model pulls are performed by the Ollama systemd service, so outbound
+#     HTTPS proxy configuration must be present in the service environment,
+#     not merely in your interactive shell.
+#   - The script is designed to be re-runnable after partial or complete runs.
 
 set -Eeuo pipefail
 
@@ -38,6 +52,12 @@ INSTALL_OPENCODE="${INSTALL_OPENCODE:-1}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-0}"
 DISABLE_CLOUD="${DISABLE_CLOUD:-1}"
 UPDATE_OLLAMA="${UPDATE_OLLAMA:-0}"
+FORCE_PULL="${FORCE_PULL:-0}"
+SKIP_PULL="${SKIP_PULL:-0}"
+DISABLE_PROXY_CONFIG="${DISABLE_PROXY_CONFIG:-0}"
+
+# Preserve whether OLLAMA_HTTPS_PROXY was explicitly supplied by the caller.
+REQUESTED_OLLAMA_HTTPS_PROXY="${OLLAMA_HTTPS_PROXY:-}"
 
 # Service bind address. Keep this local-only unless you know exactly why you need otherwise.
 OLLAMA_BIND="${OLLAMA_BIND:-127.0.0.1:11434}"
@@ -50,14 +70,28 @@ OLLAMA_CLIENT_BASE="${OLLAMA_CLIENT_BASE:-http://localhost:11434}"
 OLLAMA_CLI_HOST="${OLLAMA_CLI_HOST:-localhost:11434}"
 OLLAMA_HOST_HEADER="${OLLAMA_HOST_HEADER:-localhost:11434}"
 
+SCRIPT_OLLAMA_DROPIN_DIR="/etc/systemd/system/ollama.service.d"
+SCRIPT_MAIN_DROPIN="${SCRIPT_OLLAMA_DROPIN_DIR}/10-local-gemma4.conf"
+SCRIPT_PROXY_DROPIN="${SCRIPT_OLLAMA_DROPIN_DIR}/20-outbound-proxy.conf"
+
 log()  { printf "\n\033[1;32m==> %s\033[0m\n" "$*"; }
 warn() { printf "\n\033[1;33mWARN: %s\033[0m\n" "$*" >&2; }
 die()  { printf "\nERROR: %s\n" "$*" >&2; exit 1; }
+
+systemd_escape_env_value() {
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
 
 # Use this wrapper for local Ollama HTTP API calls only.
 # It bypasses proxy interception and supplies the Host header that worked in testing.
 ollama_api_curl() {
   env \
+    -u HTTP_PROXY -u http_proxy \
+    -u HTTPS_PROXY -u https_proxy \
+    -u ALL_PROXY -u all_proxy \
     NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}" \
     no_proxy="127.0.0.1,localhost,::1${no_proxy:+,$no_proxy}" \
     curl --noproxy '*' \
@@ -66,13 +100,173 @@ ollama_api_curl() {
 }
 
 # Use this wrapper for local Ollama CLI calls.
+# The CLI talks to the local daemon; the daemon handles outbound model downloads.
 ollama_cli() {
   env \
+    -u HTTP_PROXY -u http_proxy \
+    -u HTTPS_PROXY -u https_proxy \
+    -u ALL_PROXY -u all_proxy \
     NO_PROXY="127.0.0.1,localhost,::1${NO_PROXY:+,$NO_PROXY}" \
     no_proxy="127.0.0.1,localhost,::1${no_proxy:+,$no_proxy}" \
     OLLAMA_HOST="${OLLAMA_CLI_HOST}" \
     ollama "$@"
 }
+
+model_exists() {
+  local model_name="$1"
+  ollama_cli show "$model_name" >/dev/null 2>&1
+}
+
+unload_ollama_model() {
+  local model_name="$1"
+  [ -n "$model_name" ] || return 0
+
+  ollama_api_curl -fsS \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg model "$model_name" '{model:$model, prompt:"", keep_alive:0}')" \
+    "${OLLAMA_API_BASE}/api/generate" \
+    >/dev/null 2>&1 || true
+}
+
+detect_existing_ollama_https_proxy() {
+  local envline
+  envline="$(systemctl show ollama -p Environment --value 2>/dev/null || true)"
+  printf '%s\n' "$envline" \
+    | tr ' ' '\n' \
+    | awk -F= 'tolower($1)=="https_proxy" { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+select_ollama_https_proxy() {
+  if [ "$DISABLE_PROXY_CONFIG" = "1" ]; then
+    printf ''
+    return 0
+  fi
+
+  # Highest priority: explicit script input.
+  if [ -n "$REQUESTED_OLLAMA_HTTPS_PROXY" ]; then
+    printf '%s' "$REQUESTED_OLLAMA_HTTPS_PROXY"
+    return 0
+  fi
+
+  # Next: current interactive shell HTTPS proxy.
+  if [ -n "${HTTPS_PROXY:-}" ]; then
+    printf '%s' "$HTTPS_PROXY"
+    return 0
+  fi
+
+  if [ -n "${https_proxy:-}" ]; then
+    printf '%s' "$https_proxy"
+    return 0
+  fi
+
+  # Next: preserve a previously configured Ollama service HTTPS proxy.
+  local existing_proxy
+  existing_proxy="$(detect_existing_ollama_https_proxy || true)"
+  if [ -n "$existing_proxy" ]; then
+    printf '%s' "$existing_proxy"
+    return 0
+  fi
+
+  # Last resort: use ALL_PROXY only for the daemon's outbound HTTPS pulls.
+  if [ -n "${ALL_PROXY:-}" ]; then
+    printf '%s' "$ALL_PROXY"
+    return 0
+  fi
+
+  if [ -n "${all_proxy:-}" ]; then
+    printf '%s' "$all_proxy"
+    return 0
+  fi
+
+  printf ''
+}
+
+ensure_ollama_service_unit() {
+  if systemctl cat ollama >/dev/null 2>&1; then
+    return 0
+  fi
+
+  warn "ollama.service was not found. Creating a minimal systemd unit."
+
+  local ollama_bin
+  ollama_bin="$(command -v ollama || true)"
+  [ -n "$ollama_bin" ] || die "ollama binary not found; cannot create systemd service."
+
+  sudo useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama 2>/dev/null || true
+  sudo mkdir -p /usr/share/ollama
+  sudo chown -R ollama:ollama /usr/share/ollama
+
+  sudo tee /etc/systemd/system/ollama.service >/dev/null <<EOF_SERVICE
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=${ollama_bin} serve
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+}
+
+configure_ollama_service() {
+  local outbound_proxy="$1"
+
+  log "Configuring Ollama for local-only, CPU-friendly operation"
+  sudo mkdir -p "$SCRIPT_OLLAMA_DROPIN_DIR"
+
+  sudo tee "$SCRIPT_MAIN_DROPIN" >/dev/null <<EOF_MAIN
+[Service]
+Environment="OLLAMA_HOST=${OLLAMA_BIND}"
+Environment="OLLAMA_CONTEXT_LENGTH=${CONTEXT}"
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="OLLAMA_KEEP_ALIVE=10m"
+Environment="OLLAMA_NO_CLOUD=${DISABLE_CLOUD}"
+
+# Keep local client-to-Ollama traffic out of proxies.
+Environment="NO_PROXY=127.0.0.1,localhost,::1"
+Environment="no_proxy=127.0.0.1,localhost,::1"
+
+# Avoid HTTP/ALL proxy interference with local Ollama API traffic.
+# For outbound model downloads behind a proxy, this script writes HTTPS_PROXY
+# into ${SCRIPT_PROXY_DROPIN}.
+Environment="HTTP_PROXY="
+Environment="http_proxy="
+Environment="ALL_PROXY="
+Environment="all_proxy="
+UnsetEnvironment=HTTP_PROXY http_proxy ALL_PROXY all_proxy
+EOF_MAIN
+
+  if [ -n "$outbound_proxy" ]; then
+    local proxy_escaped
+    proxy_escaped="$(systemd_escape_env_value "$outbound_proxy")"
+
+    log "Configuring outbound HTTPS proxy for Ollama model pulls"
+    sudo tee "$SCRIPT_PROXY_DROPIN" >/dev/null <<EOF_PROXY
+[Service]
+# Outbound model pulls use HTTPS. The proxy URL may itself start with http://.
+Environment="HTTPS_PROXY=${proxy_escaped}"
+Environment="https_proxy=${proxy_escaped}"
+EOF_PROXY
+  else
+    log "No Ollama outbound HTTPS proxy configured by this script"
+    sudo rm -f "$SCRIPT_PROXY_DROPIN"
+  fi
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now ollama
+  sudo systemctl restart ollama
+}
+
+if [ "${EUID}" -eq 0 ]; then
+  warn "You are running as root. User-level OpenCode/Claude helpers will be written under ${HOME}."
+fi
 
 if ! command -v sudo >/dev/null 2>&1; then
   die "sudo is required."
@@ -128,41 +322,10 @@ else
   curl -fsSL https://ollama.com/install.sh | sh
 fi
 
-log "Configuring Ollama for local-only, CPU-friendly operation"
-sudo mkdir -p /etc/systemd/system/ollama.service.d
+ensure_ollama_service_unit
 
-sudo tee /etc/systemd/system/ollama.service.d/10-local-gemma4.conf >/dev/null <<EOF
-[Service]
-Environment="OLLAMA_HOST=${OLLAMA_BIND}"
-Environment="OLLAMA_CONTEXT_LENGTH=${CONTEXT}"
-Environment="OLLAMA_NUM_PARALLEL=1"
-Environment="OLLAMA_MAX_LOADED_MODELS=1"
-Environment="OLLAMA_KEEP_ALIVE=10m"
-Environment="OLLAMA_NO_CLOUD=${DISABLE_CLOUD}"
-
-# Keep local client-to-Ollama traffic out of proxies.
-Environment="NO_PROXY=127.0.0.1,localhost,::1"
-Environment="no_proxy=127.0.0.1,localhost,::1"
-
-# Avoid HTTP/ALL proxy interference with local Ollama API traffic.
-# For outbound model downloads behind a corporate proxy, prefer OLLAMA_HTTPS_PROXY.
-Environment="HTTP_PROXY="
-Environment="http_proxy="
-Environment="ALL_PROXY="
-Environment="all_proxy="
-UnsetEnvironment=HTTP_PROXY http_proxy ALL_PROXY all_proxy
-EOF
-
-if [ -n "${OLLAMA_HTTPS_PROXY:-}" ]; then
-  sudo tee -a /etc/systemd/system/ollama.service.d/10-local-gemma4.conf >/dev/null <<EOF
-Environment="HTTPS_PROXY=${OLLAMA_HTTPS_PROXY}"
-Environment="https_proxy=${OLLAMA_HTTPS_PROXY}"
-EOF
-fi
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now ollama
-sudo systemctl restart ollama
+OLLAMA_HTTPS_PROXY_EFFECTIVE="$(select_ollama_https_proxy)"
+configure_ollama_service "$OLLAMA_HTTPS_PROXY_EFFECTIVE"
 
 log "Waiting for Ollama API"
 for i in $(seq 1 60); do
@@ -194,14 +357,34 @@ for i in $(seq 1 60); do
   fi
 done
 
-log "Pulling model: ${MODEL}"
-ollama_cli pull "$MODEL"
+log "Model pull policy"
+if [ "$SKIP_PULL" = "1" ]; then
+  warn "SKIP_PULL=1 set; skipping ollama pull for ${MODEL}."
+elif model_exists "$MODEL" && [ "$FORCE_PULL" != "1" ]; then
+  log "Model already present locally: ${MODEL}. Set FORCE_PULL=1 to refresh it."
+else
+  log "Pulling model: ${MODEL}"
+  if ! ollama_cli pull "$MODEL"; then
+    echo
+    echo "Ollama daemon logs related to the failed pull:"
+    sudo journalctl -u ollama --no-pager -n 200 \
+      | grep -Ei 'pull|manifest|registry|proxy|timeout|error|cloud|tls|certificate|connect' || true
 
-log "Creating local model profile: ${LOCAL_MODEL} with context ${CONTEXT}"
+    die "Model pull failed. If this VM uses a proxy, set OLLAMA_HTTPS_PROXY=http://proxy:port and rerun."
+  fi
+fi
+
+log "Unloading stale local model handles, if any"
+unload_ollama_model "$LOCAL_MODEL"
+if [ "$CLAUDE_MODEL_ALIAS" != "$LOCAL_MODEL" ]; then
+  unload_ollama_model "$CLAUDE_MODEL_ALIAS"
+fi
+
+log "Creating or updating local model profile: ${LOCAL_MODEL} with context ${CONTEXT}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
-cat > "${workdir}/Modelfile" <<EOF
+cat > "${workdir}/Modelfile" <<EOF_MODEL
 FROM ${MODEL}
 PARAMETER num_ctx ${CONTEXT}
 PARAMETER temperature 0.2
@@ -211,15 +394,19 @@ SYSTEM """
 You are a local JavaScript coding assistant. Be precise, concise, and security-minded.
 When asked to modify code, explain risky assumptions and return complete runnable snippets.
 """
-EOF
+EOF_MODEL
 
 ollama_cli create "$LOCAL_MODEL" -f "${workdir}/Modelfile"
 
-log "Creating Claude-compatible model alias: ${CLAUDE_MODEL_ALIAS}"
-if ollama_cli show "$CLAUDE_MODEL_ALIAS" >/dev/null 2>&1; then
-  ollama_cli rm "$CLAUDE_MODEL_ALIAS" >/dev/null 2>&1 || true
+if [ "$CLAUDE_MODEL_ALIAS" = "$LOCAL_MODEL" ]; then
+  warn "CLAUDE_MODEL_ALIAS equals LOCAL_MODEL; skipping separate alias creation."
+else
+  log "Creating or updating Claude-compatible model alias: ${CLAUDE_MODEL_ALIAS}"
+  cat > "${workdir}/ClaudeAlias.Modelfile" <<EOF_ALIAS
+FROM ${LOCAL_MODEL}
+EOF_ALIAS
+  ollama_cli create "$CLAUDE_MODEL_ALIAS" -f "${workdir}/ClaudeAlias.Modelfile"
 fi
-ollama_cli cp "$LOCAL_MODEL" "$CLAUDE_MODEL_ALIAS" || true
 
 log "Preloading model"
 ollama_api_curl -fsS \
@@ -229,7 +416,7 @@ ollama_api_curl -fsS \
   >/dev/null || true
 
 log "Running JavaScript analysis/generation sanity check through Ollama native chat API"
-PROMPT=$(cat <<'EOF'
+PROMPT=$(cat <<'EOF_PROMPT'
 Analyze this JavaScript for correctness and security. Then provide a safer rewrite.
 
 function login(req, res, db) {
@@ -242,7 +429,7 @@ function login(req, res, db) {
     }
   });
 }
-EOF
+EOF_PROMPT
 )
 
 payload="$(jq -nc \
@@ -291,7 +478,7 @@ echo "$anthropic_out" | jq -r '.content[0].text // .content // .'
 log "Writing OpenCode config"
 mkdir -p "$HOME/.config/opencode"
 
-cat > "$HOME/.config/opencode/opencode.json" <<EOF
+cat > "$HOME/.config/opencode/opencode.json" <<EOF_OPENCODE
 {
   "\$schema": "https://opencode.ai/config.json",
   "provider": {
@@ -312,7 +499,7 @@ cat > "$HOME/.config/opencode/opencode.json" <<EOF
     }
   }
 }
-EOF
+EOF_OPENCODE
 
 cat "$HOME/.config/opencode/opencode.json"
 
@@ -342,16 +529,16 @@ fi
 log "Creating helper launchers in ~/bin"
 mkdir -p "$HOME/bin"
 
-cat > "$HOME/bin/opencode-local-gemma4" <<EOF
+cat > "$HOME/bin/opencode-local-gemma4" <<EOF_OPENCODE_HELPER
 #!/usr/bin/env bash
 export PATH="\$HOME/.npm-global/bin:\$PATH"
 export NO_PROXY="127.0.0.1,localhost,::1\${NO_PROXY:+,\$NO_PROXY}"
 export no_proxy="\$NO_PROXY"
 exec opencode --model "ollama/${LOCAL_MODEL}" "\$@"
-EOF
+EOF_OPENCODE_HELPER
 chmod +x "$HOME/bin/opencode-local-gemma4"
 
-cat > "$HOME/bin/claude-local-gemma4" <<EOF
+cat > "$HOME/bin/claude-local-gemma4" <<EOF_CLAUDE_HELPER
 #!/usr/bin/env bash
 export ANTHROPIC_AUTH_TOKEN=ollama
 export ANTHROPIC_BASE_URL=${OLLAMA_CLIENT_BASE}
@@ -359,18 +546,21 @@ export CLAUDE_CODE_ATTRIBUTION_HEADER=0
 export NO_PROXY="127.0.0.1,localhost,::1\${NO_PROXY:+,\$NO_PROXY}"
 export no_proxy="\$NO_PROXY"
 exec claude --model "${CLAUDE_MODEL_ALIAS}" "\$@"
-EOF
+EOF_CLAUDE_HELPER
 chmod +x "$HOME/bin/claude-local-gemma4"
 
 if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
 fi
 
+log "Current Ollama models"
+ollama_cli list || true
+
 log "Current Ollama loaded models"
 ollama_cli ps || true
 
 log "Setup complete"
-cat <<EOF
+cat <<EOF_DONE
 
 Local model:
   ${LOCAL_MODEL}
@@ -403,8 +593,10 @@ Manual Claude Code environment:
 Re-test local Ollama health check:
   curl -fsS --noproxy '*' -H 'Host: ${OLLAMA_HOST_HEADER}' ${OLLAMA_API_BASE}/api/version
 
-Try 26B only as a slow experiment:
-  MODEL=gemma4:26b-a4b-it-q4_K_M LOCAL_MODEL=gemma4-26b-js CONTEXT=4096 ./setup-gemma4-local.sh
+Refresh the base model on a later rerun:
+  FORCE_PULL=1 ./setup-gemma4-local.sh
 
-EOF
+Disable this script's proxy drop-in on a later rerun:
+  DISABLE_PROXY_CONFIG=1 ./setup-gemma4-local.sh
 
+EOF_DONE
