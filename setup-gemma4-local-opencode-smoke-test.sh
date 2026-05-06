@@ -19,7 +19,7 @@ env \
   OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 \
   OPENCODE_DISABLE_MOUSE=1 \
   timeout 900 \
-  opencode --pure run \
+  opencode --log-level DEBUG --print-logs --pure run \
     --model ollama/gemma4-js-local \
     --dir /tmp/oc-smoke \
     --title smoke \
