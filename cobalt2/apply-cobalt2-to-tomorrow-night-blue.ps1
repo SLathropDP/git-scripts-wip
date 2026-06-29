@@ -30,7 +30,7 @@ function Read-JsonFile([string]$Path) {
         Write-Error "File not found: $Path"
         exit 1
     }
-    Get-Content -Raw $Path | ConvertFrom-Json
+    Get-Content -Raw -Encoding UTF8 $Path | ConvertFrom-Json
 }
 
 function Write-JsonFile([string]$Path, $Object) {
