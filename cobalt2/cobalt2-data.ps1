@@ -477,7 +477,7 @@
             }
         },
         @{
-            name = "[HTML] - Quotes"
+            name = "[HTML] - Quotes. these are a slightly different colour because expand selection will then not include quotes"
             scope = "punctuation.definition.string.begin, punctuation.definition.string.end"
             settings = @{
                 foreground = "#92fc79"
@@ -748,7 +748,7 @@
         },
         @{
             name = "Italicsify for Operator Mono"
-            scope = @("modifier", "this", "comment", "storage.modifier", "entity.other.attribute-name.js", "entity.other.attribute-name.ts", "entity.other.attribute-name.tsx", "entity.other.attribute-name.html")
+            scope = @("modifier", "this", "comment", "storage.modifier", "entity.other.attribute-name.js", "entity.other.attribute-name.js", "entity.other.attribute-name.ts", "entity.other.attribute-name.tsx", "entity.other.attribute-name.html")
             settings = @{
                 fontStyle = "italic"
             }
