@@ -1,5 +1,4 @@
 {
-  "$schema": "vscode://schemas/color-theme",
   "name": "Cobalt2",
   "type": "dark",
   "semanticHighlighting": true,

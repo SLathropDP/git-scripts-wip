@@ -30,8 +30,13 @@ function Read-JsonFile([string]$Path) {
         Write-Error "File not found: $Path"
         exit 1
     }
-    $content = [System.IO.File]::ReadAllText((Resolve-Path $Path), [System.Text.Encoding]::UTF8)
-    ConvertFrom-Json $content
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $Path).Path)
+    $offset = 0
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $offset = 3
+    }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
+    return (ConvertFrom-Json -InputObject $text)
 }
 
 function Write-JsonFile([string]$Path, $Object) {
