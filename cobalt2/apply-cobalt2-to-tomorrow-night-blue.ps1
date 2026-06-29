@@ -36,6 +36,11 @@ function Read-SettingsJson([string]$Path) {
         $offset = 3
     }
     $text = [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
+    # VS Code settings.json is JSONC (allows comments and trailing commas).
+    # Strip both so ConvertFrom-Json can parse it.
+    $text = [regex]::Replace($text, '//[^\r\n]*', '')
+    $text = [regex]::Replace($text, '/\*[\s\S]*?\*/', '')
+    $text = [regex]::Replace($text, ',\s*([}\]])', '$1')
     return (ConvertFrom-Json -InputObject $text)
 }
 
