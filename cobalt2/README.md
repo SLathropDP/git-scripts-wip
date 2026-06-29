@@ -8,7 +8,8 @@ The script re-skins the built-in **Tomorrow Night Blue** theme by injecting Coba
 
 | File | Description |
 |------|-------------|
-| `cobalt2-theme.json` | Complete Cobalt2 color definitions (UI, tokenColors, semanticTokenColors) |
+| `cobalt2-theme.json` | Complete Cobalt2 color definitions (reference/source JSON) |
+| `cobalt2-data.ps1` | Theme data as native PowerShell hashtables (used by the script) |
 | `apply-cobalt2-to-tomorrow-night-blue.ps1` | PowerShell script to apply/revert the theme |
 | `cobalt2.bat` | CMD wrapper for the PowerShell script |
 
