@@ -10,6 +10,7 @@ The script re-skins the built-in **Tomorrow Night Blue** theme by injecting Coba
 |------|-------------|
 | `cobalt2-theme.json` | Complete Cobalt2 color definitions (UI, tokenColors, semanticTokenColors) |
 | `apply-cobalt2-to-tomorrow-night-blue.ps1` | PowerShell script to apply/revert the theme |
+| `apply-cobalt2-to-tomorrow-night-blue.bat` | CMD wrapper for the PowerShell script |
 
 ## Usage
 
@@ -19,6 +20,13 @@ The script re-skins the built-in **Tomorrow Night Blue** theme by injecting Coba
 
 # Revert to original Tomorrow Night Blue
 .\apply-cobalt2-to-tomorrow-night-blue.ps1 -Undo
+```
+
+Or from CMD:
+
+```cmd
+apply-cobalt2-to-tomorrow-night-blue.bat
+apply-cobalt2-to-tomorrow-night-blue.bat -Undo
 ```
 
 After running, open VS Code and select **Tomorrow Night Blue** from the theme picker (`Ctrl+K Ctrl+T`).
